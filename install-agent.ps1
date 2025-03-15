@@ -10,7 +10,7 @@ try {
     # Azure DevOps details
     #v4.253.0
     #"3.220.5"
-    $agentVersion = "v4.253.0"
+    $agentVersion = "4.253.0"
     $agentName = "TestingTerraformAgent"
     $agentDir = "C:\\agent"
     # Ensure the agent directory exists
