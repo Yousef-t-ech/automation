@@ -1,0 +1,1200 @@
+resources:
+  pipelines:
+    - pipeline: Backend-CI
+      project: Halal # The name of your project
+      source: Backend-CI # The name of the first pipeline
+
+  repositories:
+  # confiq repository
+  - repository: Config
+    type: git
+    name: Halal/Config
+
+  # App repository
+  - repository: App_Repo 
+    type: git
+    name: Halal/Thiqah.Halal.Backend
+    ref: 'refs/heads/release/v0.0.3'
+
+  - repository: DevOpsTemplates
+    type: git
+    name: DevOps/Pipeline
+    ref: 'feature/CI-POC'
+    
+  # Deploy Apigee
+  - repository: CICD_REPO
+    type: git
+    name: APIM_Proxies/cicd
+    ref: 'refs/heads/main'
+
+  - repository: APIPROXY_REPO
+    type: git
+    name: APIM_Proxies/thiqah-external_apiproxies
+    ref: 'refs/heads/main'
+trigger:
+- none
+
+pool:
+  name: VMSS_AGENTS_LINUX
+
+variables:
+  - name: AppRepoBranch
+    value: $[ resources.repositories['App_Repo'].ref ]
+  - template: pre-prod-variables.yaml
+  - template: test-variables.yaml
+  - template: Pipeline/Backend/Backend-variables.yaml@App_Repo
+
+  - name: pipelineName
+    value: $(resources.pipeline.Backend-CI.pipelineName)
+  - name: pipelineID
+    value: $(resources.pipeline.Backend-CI.pipelineID)
+  - name: runName
+    value: $(resources.pipeline.Backend-CI.runName)
+  - name: runID
+    value: $(resources.pipeline.Backend-CI.runID)
+  - name: sourceBranch
+    value: $(resources.pipeline.Backend-CI.sourceBranch)
+
+name: $(AppRepoBranchName).$(rev:r)
+
+# Test Env 
+stages:
+- stage: Test
+  variables:
+    - template: test-variables.yaml #variables.yaml
+    - name: TARGET_BRANCH
+      value: Test
+  jobs: 
+  - deployment: "Prepare_Test_Environment"
+    displayName: "Prepare Environment"
+    environment: 'Test'
+    pool:
+      name: VMSS_BUILDAGENTS_WINDOWS
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: CI-CD/steps-of-cd/Test/Template/prepareEnvironment.yaml@DevOpsTemplates
+
+  - job: "PrepareCamundaSettings"
+    displayName: "Prepare Camunda Settings"
+    condition: eq(variables.Deploy_Camunda, 'true')
+    pool:
+      name: VMSS_BUILDAGENTS_WINDOWS
+    steps:
+      - template:  CI-CD/steps-of-cd/Test/camunda/changeSettings.yaml@DevOpsTemplates
+        parameters:
+          artifactNameCamunda: $(artifactNameCamunda)
+          CamundaFolderName: $(CamundaFolderName)
+          GatewayAddress: $(GatewayAddress)
+          TaskBaseUrl: $(TaskBaseUrl)
+          TokenBaseUrl: $(TokenBaseUrl)
+          OperateBaseUrl: $(OperateBaseUrl)
+          ClientId: $(ClientId)
+          ClientSecret: $(ClientSecret)
+
+  - job: "runCamunda"
+    displayName: "run Camunda"
+    condition: and(eq(variables.Deploy_Camunda, 'true'), succeeded('PrepareCamundaSettings'))
+    dependsOn: PrepareCamundaSettings
+    pool:
+      name: VMSS_BUILDAGENTS_WINDOWS
+    steps:
+      - template: CI-CD/steps-of-cd/Test/camunda/run-camunda.yaml@DevOpsTemplates
+        parameters:
+          artifactNameCamunda: $(artifactNameCamunda)
+          CamundaFolderName: $(CamundaFolderName)
+
+  - job: "PrepareMigratorSettings"
+    displayName: "Prepare Migrator Settings"
+    condition: eq(variables.Deploy_Migrator, 'true')
+    pool:
+      name: VMSS_BUILDAGENTS_WINDOWS
+    steps:
+      - template: CI-CD/steps-of-cd/Test/componentMigrator/changeSettings.yaml@DevOpsTemplates
+        parameters:
+          artifactName: $(artifactName)
+          RedisConfiguration: $(RedisConfiguration)
+          MigrationScriptFilePath: $(MigrationScriptFilePath)
+          ConnectionStringsDefault: $(ConnectionStringsDefault)
+          ConnectionStringsIdentityService: $(ConnectionStringsIdentityService)
+          ConnectionStringsAdministrationService: $(ConnectionStringsAdministrationService)
+          ConnectionStringsFacilityService: $(ConnectionStringsFacilityService)
+          ConnectionStringsCBAccreditationService: $(ConnectionStringsCBAccreditationService)
+          ConnectionStringsSharedService: $(ConnectionStringsSharedService)
+          ConnectionStringsAttachments: $(ConnectionStringsAttachments)
+          ConnectionStringsPaymentsService: $(ConnectionStringsPaymentsService)
+          ConnectionStringsInternalFacilityRequestService: $(ConnectionStringsInternalFacilityRequestService)
+          ConnectionStringsProductCatalog: $(ConnectionStringsProductCatalog)
+          ConnectionStringsExternalFacilityRequestsService: $(ConnectionStringsExternalFacilityRequestsService)
+          ConnectionStringsShipmentService: $(ConnectionStringsShipmentService)
+          ConnectionStringsNotificationService: $(ConnectionStringsNotificationService)
+          migratorFolderName: $(migratorFolderName)
+
+  # Check Migrator Pending Migrations
+  - job: "Migrator_Test_Check_Pending_Migrations"
+    displayName: "Migrator Check Pending Migrations"
+    condition: eq(variables.Deploy_Migrator, 'true')
+    dependsOn: PrepareMigratorSettings
+    pool:
+      name: VMSS_BUILDAGENTS_WINDOWS
+    steps:
+      - template: CI-CD/steps-of-cd/Test/componentMigrator/migrator-check-pending-migrations.yaml@DevOpsTemplates
+        parameters:
+          DBName: $(Test_Database_Name)
+          Database_ServerName: $(Test_ServerName)
+          DeveloperEmail: $(DB_DeveloperEmail)
+          DBA_ApproverEmail: $(DBNotifyUsers)
+          ApprovalJobName:  Test_Wait_for_DBA_Approval
+          artifactName: $(artifactName)
+          Notes:  ''
+          migratorFolderName: $(migratorFolderName)
+
+  # Wait for DB Team Approval     
+  - job: Test_Wait_for_DBA_Approval
+    condition: succeeded()
+    dependsOn: Migrator_Test_Check_Pending_Migrations
+    displayName: Test Wait for DB Approval
+    pool: server
+    timeoutInMinutes: 4320 # job times out in 3 days
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 1440 # task times out in 1 day
+      inputs:
+        notifyUsers: |
+          $(DBNotifyUsers)
+        instructions: 'Please review database difference script and resume'         
+
+    #  # Execute Migrator
+
+  - job: "Migrator_Test_Execute_Pending_Migrations"
+    displayName: "Execute Migrator"
+    dependsOn: 
+      - Test_Wait_for_DBA_Approval
+      - Migrator_Test_Check_Pending_Migrations
+    condition: and(eq(variables.Deploy_Migrator,'true'), succeeded('Test_Wait_for_DBA_Approval'))
+    pool:
+      name: VMSS_BUILDAGENTS_WINDOWS
+    steps:
+      - template: CI-CD/steps-of-cd/Test/componentMigrator/migrator-execute.yaml@DevOpsTemplates
+        parameters:
+          artifactName: $(artifactName)
+          migratorFolderName: $(migratorFolderName)
+
+  - job: "Adding_Updated_Manifests"
+    condition: |
+      not(
+        or(
+          eq(variables.AppRepoBranch,'refs/heads/master'), 
+          eq(variables.AppRepoBranch,'refs/heads/main'), 
+          startsWith(variables.AppRepoBranch,'refs/heads/hotfix/')
+          )
+        )
+    displayName: "Adding Updated Manifests"
+    steps: 
+      - template: CI-CD/steps-of-cd/Test/Template/update-manifests.yaml@DevOpsTemplates #If you are using harbor Not ACR please use manifest-push.yaml template
+        parameters:
+          REPO_URL: $(REPO_URL) # GitOps Repo
+          MANIFEST_DIR: $(MANIFEST_DIR) # Manifest in the GitOps Repo
+          SourceManifestPath: $(SourceManifestPath) # Path to the Service Manifest in the App Repo
+          DestManifestPath: $(DestManifestPath)
+          PROGRAM_NAME: $(PROGRAM_NAME)
+          PRODUCT_NAME: $(PRODUCT_NAME)
+          REPO_NAME: $(REPO_NAME) # ACR Repo Name
+          ImageTagFile: $(ImageTagFile) # The yaml that Contains the image tag value which needs to be updated
+
+  # Pull request into gitops config Test
+  - job: "Pr_Test"
+    dependsOn: "Adding_Updated_Manifests"
+    displayName: "Pr into Test"
+    # Identifying variables, job level.
+    variables:
+      - name: TARGET_BRANCH
+        value: Test
+    steps:
+      - template: CI-CD/steps-of-cd/Test/Template/pr.yaml@DevOpsTemplates
+
+  # Deploy DB
+  - job: "DB_ExecuteScript"
+    condition: and(eq(variables.databaseScript,'true'), eq(variables.Deploy_DB, 'true'))
+    displayName: "Execute DB Script"
+    dependsOn: "Pr_Test"
+    pool:
+      name: Default
+    steps:
+      - template: CI-CD/steps-of-cd/Test/Template/executeDBScript.yaml@DevOpsTemplates
+        parameters:
+          dacpacName: ${{ variables.DB_dacpacName }}
+          publishProfile: ${{ variables.DB_publishProfile }}
+          ConnectionString: ${{ variables.ConnectionString }}
+
+  # Delay for 3 minutes, waiting GitOps Operator to sync the changes.
+  - job: Delay
+    dependsOn: "Pr_Test"
+    pool: Server
+    steps:
+    - task: Delay@1
+      inputs:
+        delayForMinutes: '3'
+
+  # Getting deployment Status
+  - job: "deployment_status"
+    displayName: "Deployment Status"
+    dependsOn: "Delay"
+    steps:
+      - template: CI-CD/steps-of-cd/Test/Template/deploy-status.yaml@DevOpsTemplates
+        parameters:
+          kubernetesServiceEndpoint: $(kubernetesServiceEndpointTest)
+          ImageTagFile: $(ImageTagFile)
+
+  # Deploy Apigee Apiproxy
+  - ${{ if eq(variables['RunApigee'], 'true') }}:
+    - job: "Deploy_Apigee"
+      displayName: "Deploy Apigee Apiproxy To Test"
+      condition: eq(variables.RunApigee, 'true')
+      dependsOn: "deployment_status"
+      variables:
+        - group: ${{ variables.AuthProxy }}
+      steps:
+        - template: CI-CD/steps-of-cd/Test/Template/deploy-apigee.yaml@DevOpsTemplates
+          parameters:
+            artifactFormat: $(artifactFormat)
+            projectName: $(projectName)
+            proxyName: $(proxyName)
+            description: $(description)
+            organizationName: $(organizationName)
+            lang: $(lang)
+            origin: $(origin)
+            recaptcha: $(recaptcha)
+            credentials: $(credentials)
+            realmName: $(realmName)
+            target: $(target)
+            pat: $(authorization) 
+
+  # Generate Release Note
+  - job: "release_note"
+    displayName: "Generate Release Note"
+    dependsOn: "deployment_status"
+    steps:
+      - template: CI-CD/steps-of-cd/Test/Template/release-note.yaml@DevOpsTemplates
+
+  - ${{ if eq(variables['RunQCTest'], 'true') }}:
+    # Running QC Test
+    - job: "qa_automated_tests"
+      displayName: "QC automated tests"
+      pool:
+        name: AutomationTestAgentPool
+      condition: eq(variables.RunQCTest, 'true')
+      dependsOn: "deployment_status"
+      variables:
+        - group: ${{ variables.QCVarsGroupName }}
+      steps:
+      - ${{ if eq(variables['ApiQCTest'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/QC-API-automated-tests.yaml@DevOpsTemplates 
+      - ${{ if eq(variables['UIQCTest'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/QC-UI-automated-tests.yaml@DevOpsTemplates
+      continueOnError: true
+
+  - ${{ if eq(variables['RunPerfTest'], 'true') }}:
+    # Running Performance Test 
+    - job: "Performance_Testing"
+      displayName: "Performance Test"
+      condition: eq(variables.RunPerfTest, 'true')
+      pool:
+        name: PerformanceTestAgents
+      dependsOn: "deployment_status"
+      steps:
+        - template: CI-CD/steps-of-cd/Test/Performance-testing.yaml@DevOpsTemplates
+      continueOnError: true
+  # The test env is Done
+
+# PreProd Env 
+- stage: PreProd
+  pool:
+    name: ps-agents-linux
+  variables:
+    - template: pre-prod-variables.yaml
+    - name: TARGET_BRANCH
+      value: Preprod
+
+  # QC Approval remove later
+  jobs:
+  # - job: wait_for_QC_Approval 
+  #   displayName: Wait for QC approval to go PreProd.
+  #   pool: server
+  #   timeoutInMinutes: 4320 # job times out in 3 days
+  #   steps:
+  #   - task: ManualValidation@0
+  #     timeoutInMinutes: 1440 # task times out in 1 day
+  #     inputs:
+  #       notifyUsers: |
+  #         $(BuildParameters.QCNotifyUsers)
+  #       instructions: 'Please approve to go PreProd once tests completed'
+
+  - deployment: "Prepare_PreProd_Environment"
+    displayName: "Prepare Environment"
+    environment: 'PreProd'
+    pool:
+      name: VMSS_BUILDAGENTS_WINDOWS
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: CI-CD/steps-of-cd/Test/Template/prepareEnvironment.yaml@DevOpsTemplates
+          - script: |
+              echo "Prepare PreProd Environment"
+
+  - job: "RetainOnSuccess"
+    displayName: "Retain On Success"
+    dependsOn: "Prepare_PreProd_Environment"
+    pool:
+      name: VMSS_BUILDAGENTS_WINDOWS
+    steps:
+      - template: CI-CD/steps-of-cd/PreProd/RetainOnSuccess.yaml@DevOpsTemplates
+
+  - job: "PrepareCamundaSettings"
+    displayName: "Prepare Camunda Settings"
+    condition: eq(variables.Deploy_Camunda, 'true')
+    pool:
+      name: PS-DatabaseReleaseAgents
+    steps:
+      - template:  CI-CD/steps-of-cd/Test/camunda/changeSettings.yaml@DevOpsTemplates
+        parameters:
+          artifactNameCamunda: $(artifactNameCamunda)
+          CamundaFolderName: $(CamundaFolderName)
+          GatewayAddress: $(PreGatewayAddress)
+          TaskBaseUrl: $(PreTaskBaseUrl)
+          TokenBaseUrl: $(PreTokenBaseUrl)
+          OperateBaseUrl: $(PreOperateBaseUrl)
+          ClientId: $(PreClientId)
+          ClientSecret: $(PreClientSecret)
+
+  - job: "runCamunda"
+    displayName: "run Camunda"
+    condition: and(eq(variables.Deploy_Camunda, 'true'), succeeded('PrepareCamundaSettings'))
+    dependsOn: PrepareCamundaSettings
+    pool:
+      name: PS-DatabaseReleaseAgents
+    steps:
+      - template: CI-CD/steps-of-cd/Test/camunda/run-camunda.yaml@DevOpsTemplates
+        parameters:
+          artifactNameCamunda: $(artifactNameCamunda)
+          CamundaFolderName: $(CamundaFolderName)
+
+  # Prepare Migrator Settings
+  - job: "PrepareMigratorSettings"
+    displayName: "Prepare Migrator Settings"
+    condition: eq(variables.Deploy_Migrator, 'true')
+    variables:
+        # a variable group
+        - group: ${{ variables.GloVarsGroupNameppcs }}
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/Test/componentMigrator/changeSettings.yaml@DevOpsTemplates
+        parameters:
+          artifactName: $(artifactName)
+          RedisConfiguration: $(RedisConfiguration)
+          MigrationScriptFilePath: $(MigrationScriptFilePath)
+          ConnectionStringsDefault: $(ConnectionStringsDefault)
+          ConnectionStringsIdentityService: $(ConnectionStringsIdentityService)
+          ConnectionStringsAdministrationService: $(ConnectionStringsAdministrationService)
+          ConnectionStringsFacilityService: $(ConnectionStringsFacilityService)
+          ConnectionStringsCBAccreditationService: $(ConnectionStringsCBAccreditationService)
+          ConnectionStringsInternalFacilityRequestService: $(ConnectionStringsInternalFacilityRequestService)
+          ConnectionStringsProductCatalog: $(ConnectionStringsProductCatalog)
+          ConnectionStringsSharedService: $(ConnectionStringsSharedService)
+          ConnectionStringsAttachments: $(ConnectionStringsAttachments)
+          ConnectionStringsPaymentsService: $(ConnectionStringsPaymentsService)
+          ConnectionStringsExternalFacilityRequestsService: $(ConnectionStringsExternalFacilityRequestsService)
+          ConnectionStringsShipmentService: $(ConnectionStringsShipmentService)
+          ConnectionStringsNotificationService: $(ConnectionStringsNotificationService)
+          migratorFolderName: $(migratorFolderName)
+
+  # Generate Migrator
+  - job: "Migrator_PreProd_Check_Pending_Migrations"
+    displayName: "Migrator Check Pending Migrations"
+    dependsOn: PrepareMigratorSettings
+    condition: eq(variables.Deploy_Migrator, 'true')
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/Test/componentMigrator/migrator-check-pending-migrations.yaml@DevOpsTemplates
+        parameters:
+          DBName: $(Pre_Database_Name)
+          Database_ServerName: $(Pre_ServerName)
+          DeveloperEmail: $(DB_DeveloperEmail)
+          DBA_ApproverEmail: $(DBNotifyUsers)
+          ApprovalJobName:  PreProd_Wait_for_DBA_Approval
+          artifactName: $(artifactName)
+          Notes:  ''
+          migratorFolderName: $(migratorFolderName)
+
+  # DB Prepration
+  - job: "PreProd_DB_DifferenceScript"
+    condition: and(eq(variables.Deploy_DB,'true') , succeeded())
+    displayName: "Preprod DB difference script"
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/PreProd/difference-db-script.yaml@DevOpsTemplates
+        parameters:
+          DefitionID: ${{ variables.DB_Bulid_DefitionID }}
+          buildID: ${{ variables.DB_Bulid_buildID }}
+          dacpacName: ${{ variables.DB_dacpacName }}
+          publishProfile: ${{ variables.DB_publishProfile }}
+          DeveloperEmail: ${{ variables.DB_DeveloperEmail }}
+          ServerName: ${{ variables.PreProd_ServerName }}
+          DBName: ${{ variables.PreProd_DBName }}
+          DBA_ApproverEmail:  ${{ variables.DBNotifyUsers }}
+          ApprovalJobName:  PreProd_Wait_for_DBA_Approval
+          Notes:  ''
+
+  # Wait for DB Team Approval     
+  - job: PreProd_Wait_for_DBA_Approval
+    dependsOn: 
+      - Migrator_PreProd_Check_Pending_Migrations
+      - PreProd_DB_DifferenceScript
+    condition: or(succeeded('PreProd_DB_DifferenceScript'), succeeded('Migrator_PreProd_Check_Pending_Migrations'))
+    displayName: PreProd Wait for DB Approval
+    pool: server
+    timeoutInMinutes: 4320 # job times out in 3 days
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 1440 # task times out in 1 day
+      inputs:
+        notifyUsers: |
+          $(DBNotifyUsers)
+        instructions: 'Please review database difference script and resume'         
+
+    # Execute Migrator
+
+  - job: "Migrator_PreProd_Execute_Pending_Migrations"
+    displayName: "Execute Migrator"
+    dependsOn: 
+      - PreProd_Wait_for_DBA_Approval
+      - Migrator_PreProd_Check_Pending_Migrations
+    condition: and(succeeded('PreProd_Wait_for_DBA_Approval'),eq(variables.Deploy_Migrator, 'true'))
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/Test/componentMigrator/migrator-execute.yaml@DevOpsTemplates
+        parameters:
+          artifactName: $(artifactName)
+          migratorFolderName: $(migratorFolderName)
+
+  # PR into PreProd
+  - job: "PreProd_PR"
+    displayName: "PR into preprod, add updated manifests"
+    condition: |
+      and(
+        succeeded('Prepare_PreProd_Environment'), 
+        or(eq(variables.Deploy_DB,'false'), succeeded()),
+        not(
+          or(
+            eq(variables.AppRepoBranch,'refs/heads/master'), 
+            eq(variables.AppRepoBranch,'refs/heads/main'), 
+            startsWith(variables.AppRepoBranch,'refs/heads/hotfix/')
+            )
+          )
+        )
+    dependsOn: ["PreProd_Wait_for_DBA_Approval","Prepare_PreProd_Environment"]
+    variables:
+      - name: SOURCE_BRANCH
+        value: Test
+    steps:
+      - template: CI-CD/steps-of-cd/PreProd/pr-pre-prod.yaml@DevOpsTemplates
+        parameters:
+          MANIFEST_DIR: $(MANIFEST_DIR)
+          ImageTagFile: $(ImageTagFile)
+          DestManifestPath: $(DestManifestPath)
+      - template: CI-CD/steps-of-cd/Test/Template/pr.yaml@DevOpsTemplates
+
+  # PR into PreProd (Hotfix)
+  - job: "PreProd_PR_Hotfix"
+    displayName: "PR into preprod, add updated manifests"
+    condition: |
+      and(
+        succeeded('Prepare_PreProd_Environment'), 
+        or(eq(variables.Deploy_DB,'false'), succeeded()), 
+        or(
+          eq(variables.AppRepoBranch,'refs/heads/master'), 
+          eq(variables.AppRepoBranch,'refs/heads/main'), 
+          startsWith(variables.AppRepoBranch,'refs/heads/hotfix/')
+          )
+        )
+    dependsOn: ["PreProd_Wait_for_DBA_Approval","Prepare_PreProd_Environment"]
+    variables:
+      - template: test-variables.yaml
+      - name: TARGET_BRANCH
+        value: Preprod
+    steps:
+      - template: CI-CD/steps-of-cd/PreProd/hotfix.yaml@DevOpsTemplates    #If you are using harbor not ACR please use hotix-harbor.yaml template
+      - template: CI-CD/steps-of-cd/Test/Template/pr.yaml@DevOpsTemplates
+
+  # Wait for PR Approval
+  - job: wait_for_PreProd_PR_Approval
+    displayName: resume or reject after you (complete or reject the pull request)
+    dependsOn: ["PreProd_PR", "PreProd_PR_Hotfix"]
+    condition: or(succeeded('PreProd_PR'), succeeded('PreProd_PR_Hotfix'))
+    pool: server
+    timeoutInMinutes: 4320 # job times out in 3 days
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 1440 # task times out in 1 day
+      inputs:
+        notifyUsers: |
+          $(BuildParameters.PRNotifyUsers)
+        instructions: 'Please review my PR and resume'
+
+  # DB Execution
+  - job: "PreProd_DB_ExecuteScript"
+    condition:  and(eq(variables.Deploy_DB,'true'), succeeded('PreProd_Wait_for_DBA_Approval'))
+    displayName: "Execute DB Script into preprod"
+    dependsOn: "PreProd_Wait_for_DBA_Approval"
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/PreProd/execute-db-script.yaml@DevOpsTemplates
+        parameters:
+          DefitionID: ${{ variables.DB_Bulid_DefitionID }}
+          buildID: ${{ variables.DB_Bulid_buildID }}
+          dacpacName: ${{ variables.DB_dacpacName }}
+          publishProfile: ${{ variables.DB_publishProfile }}
+          ServerName: ${{ variables.PreProd_ServerName }}
+          DBName: ${{ variables.PreProd_DBName }}
+          DestManifestPath: $(DestManifestPath)
+
+  # Pre Deployment 
+  - job: "PreProd_Deployment"
+    displayName: "PreProd Deployment"
+    dependsOn: ["PreProd_DB_ExecuteScript", "wait_for_PreProd_PR_Approval"]
+    condition: |
+      or(
+        succeeded('PreProd_DB_ExecuteScript'), 
+        and(eq(variables.Deploy_DB,'false'), succeeded('wait_for_PreProd_PR_Approval'))
+        )
+    variables:
+      - group: ${{ variables.ArgoVarsGroupName }}
+    steps:
+    - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/argocd-sync.yaml@DevOpsTemplates
+        parameters:
+          ArgocdAppName: $(argocdAppName_PreApp)
+          argocdUserName: $(UserName)
+          argocdPassword: $(Password)
+          ArgocdAppAddrs: $(ArgocdAppAddrs)
+    - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/argocd-sync.yaml@DevOpsTemplates
+        parameters:
+          ArgocdAppName: $(argocdAppName_PreWeb)
+          argocdUserName: $(UserName)
+          argocdPassword: $(Password)
+          ArgocdAppAddrs: $(ArgocdAppAddrs)
+  
+  # Deployment Status
+  # If it HelmChart
+  - job: "deployment_status"
+    displayName: "Deployment Status"
+    dependsOn: "PreProd_Deployment"
+    condition: succeeded('PreProd_Deployment')
+    steps:
+    # If it helmChart
+    - ${{ if eq(variables['IsHelmChart'], 'true') }}:
+      - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/Template/deploy-status.yaml@DevOpsTemplates 
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreAPP)
+            ImageTagFile: $(ImageTagFile)
+      - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/Template/deploy-status.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreWEB)
+            ImageTagFile: $(ImageTagFile)
+    # If it plain YAML
+    - ${{ if eq(variables['IsPlainYaml'], 'true') }}:
+      - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/Template/deploy-status.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreAPP)
+            ImageTagFile: $(ImageTagFile)
+      - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/Template/deploy-status.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreWEB)
+            ImageTagFile: $(ImageTagFile)
+
+  - ${{ if eq(variables['RunApigee'], 'true') }}:
+    - job: "DeployapigeeToStaging"
+      displayName: "Deploy apigee To Staging"
+      dependsOn: "deployment_status"
+      condition: eq(variables.RunApigee, 'true')
+      pool:
+        name: VMSS_AGENTS_LINUX
+      variables:
+        # a variable group
+        - template: test-variables.yaml
+        - group: ${{ variables.productauth }}
+      steps:
+        - template: CI-CD/steps-of-cd/PreProd/deploy-apigee-pre.yaml@DevOpsTemplates
+          parameters:
+            proxyName: $(proxyName)
+            test-auth: $(test-auth)
+            test-authorization-header: $(test-authorization-header)
+            pre-auth: $(pre-auth)
+            preConfig: $(pre-config)
+
+  - job: ManualValidation_Befor_RollBack
+    dependsOn: "deployment_status"
+    condition: failed('deployment_status')
+    displayName: Resume if you want to rollback
+    pool: server
+    timeoutInMinutes: 4320 # job times out in 3 days
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 4320 # task times out in 3 day
+      inputs:
+        notifyUsers: |
+          $(BuildParameters.RollbackNotifyUsers)
+        instructions: 'If you need to rollback, resume, otherwise reject'
+  
+  - job: "Rollback"
+    displayName: "Rollback"
+    dependsOn: ["deployment_status","ManualValidation_Befor_RollBack"]
+    condition: and (ne(succeeded('deployment_status'), True), succeeded('ManualValidation_Befor_RollBack'))
+    variables:
+      - group: ${{ variables.ArgoVarsGroupName }}
+    steps:
+    - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/rollback.yaml@DevOpsTemplates
+        parameters:
+          ArgocdAppName: $(argocdAppName_PreApp)
+          argocdUserName: $(UserName)
+          argocdPassword: $(Password)
+          ArgocdAppAddrs: $(ArgocdAppAddrs)
+    - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/rollback.yaml@DevOpsTemplates
+        parameters:
+          ArgocdAppName: $(argocdAppName_PreWeb)
+          argocdUserName: $(UserName)
+          argocdPassword: $(Password)
+          ArgocdAppAddrs: $(ArgocdAppAddrs)
+
+  # Generate Release Note
+  - job: "release_note"
+    displayName: "Generate Release Note"
+    condition: succeeded('deployment_status')
+    dependsOn: "deployment_status"
+    steps:
+      - template: CI-CD/steps-of-cd/Test/Template/release-note.yaml@DevOpsTemplates
+
+  # Push to APM
+  - job: "push_apm"
+    displayName: "Push to APM"
+    pool:
+      name: PerformanceTestAgents
+    dependsOn: ["deployment_status","ManualValidation_Befor_RollBack"]
+    condition: and(succeeded('deployment_status'), ne(succeeded('ManualValidation_Befor_RollBack'), True))
+    variables:
+      - group: ${{ variables.GloVarsGroupName }} 
+      - name: envUrl
+        value: kibana-pp.thiqah.sa:5601
+      - name: ApmApiKey
+        value: $(ApmApiKeyPre)
+    steps:
+    - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/push-to-apm.yaml@DevOpsTemplates
+        parameters:
+          kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreAPP)
+    - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/push-to-apm.yaml@DevOpsTemplates
+        parameters:
+          kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreWEB)
+
+  # QC testing
+  - ${{ if eq(variables['RunQCTest'], 'true') }}:
+    - job: "QC_test_pre"
+      displayName: "QC automated tests"
+      pool:
+        name: AutomationTestAgentPool
+      condition: and(eq(variables.RunQCTest, 'true'), succeeded('deployment_status'))
+      dependsOn: "deployment_status"
+      variables:
+        - group: ${{ variables.QCVarsGroupName }}
+      continueOnError: true
+      steps:
+      - ${{ if eq(variables['ApiQCTest'], 'true') }}:
+        - template: CI-CD/steps-of-cd/PreProd/QC-API-automated-tests.yaml@DevOpsTemplates
+          parameters:
+            QCSecureFile: $(QCSecureFileName)
+      - ${{ if eq(variables['UIQCTest'], 'true') }}:
+        - template: CI-CD/steps-of-cd/PreProd/QC-API-automated-tests.yaml@DevOpsTemplates
+
+  # Penetration testing
+  - ${{ if eq(variables['RunPentTest'], 'true') }}:
+    - job: "Pen_Testing"
+      displayName: " Penetration testing"
+      pool:
+        name: Default
+      condition: and(eq(variables.RunPentTest, 'true'), eq(variables.isPenAutomated, 'true'))
+      dependsOn: "deployment_status"
+      continueOnError: true
+      steps:
+      - template: CI-CD/steps-of-cd/PreProd/penetration-testing.yaml@DevOpsTemplates
+        parameters:
+          scanWebSites: $(PenscanWebSites)
+          scanWebSitesProfile: $(PenscanWebSitesProfile)
+
+  # Performance testing
+  - ${{ if eq(variables['RunPerfTest'], 'true') }}:
+    - job: "Performance_testing"
+      displayName: "Performance testing"
+      pool:
+        name: PerformanceTestAgents
+      variables:
+        - group: ${{ variables.PerfVarsGroupName }}
+        - group: ${{ variables.Perf2VarsGroupName }}
+      condition: and(eq(variables.isPerfJMeterAutomated, 'true'), eq(variables.RunPerfTest, 'true'), succeeded('deployment_status'))
+      dependsOn: "deployment_status"
+      continueOnError: true
+      steps:
+        - template: CI-CD/steps-of-cd/PreProd/Performance-testing.yaml@DevOpsTemplates
+
+  # Email Status
+  - job: "deployment_email"
+    displayName: "Send Email Status"
+    dependsOn: ["push_apm","release_note"]
+    condition: succeeded('deployment_status')
+    pool:
+      name: PS-AgentPool
+    variables:
+      - group: ${{ variables.GloVarsGroupName }}
+      - name: releasenote-status
+        value: $[ dependencies.release_note.result ]
+      - name: pushedtagapm-status
+        value: $[ dependencies.push_apm.result ]
+      - name: TARGET_BRANCH
+        value: Preprod
+      - template: test-variables.yaml
+    steps:
+      - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/PreProd/send-email.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreAPP)
+            exchange-account-app-password: $(exchange-account-app-password)
+            DeploymentStatusEmail: $(DeploymentStatusEmail)
+      - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/PreProd/send-email.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreWEB)
+            exchange-account-app-password: $(exchange-account-app-password)
+            DeploymentStatusEmail: $(DeploymentStatusEmail)
+
+# Production
+- stage: Production
+  pool:
+    name: ps-agents-linux
+  variables:
+    - template: pre-prod-variables.yaml
+    - name: TARGET_BRANCH
+      value: Production
+  jobs:
+  # remove later
+  # - job: MoveToProduction_QC_Approval
+  #   displayName: Wait for QC approval to go production.
+  #   pool: server
+  #   timeoutInMinutes: 4320 # job times out in 3 days
+  #   steps:
+  #   - task: ManualValidation@0
+  #     timeoutInMinutes: 1440 # task times out in 1 day
+  #     inputs:
+  #       notifyUsers: |
+  #         $(BuildParameters.QCNotifyUsers)
+  #       instructions: 'Please approve to go production once tests completed'
+  
+  - deployment: "Prepare_Prod_Environment"
+    displayName: "Prepare Environment"
+    environment: 'Prod'
+    pool:
+      name: VMSS_BUILDAGENTS_WINDOWS
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: CI-CD/steps-of-cd/Test/Template/prepareEnvironment.yaml@DevOpsTemplates
+          - script: |
+              echo "Prepare Prod Environment"
+          
+    # Prepare Migrator Settings
+  - job: "PrepareMigratorSettings"
+    displayName: "Prepare Migrator Settings"
+    condition: eq(variables.Deploy_Migrator, 'true')
+    variables:
+        # a variable group
+        - group: ${{ variables.GloVarsGroupNamepcs }}
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/Test/componentMigrator/changeSettings.yaml@DevOpsTemplates
+        parameters:
+          artifactName: $(artifactName)
+          RedisConfiguration: $(ProductionRedisConfiguration)
+          MigrationScriptFilePath: $(MigrationScriptFilePath)
+          ConnectionStringsDefault: $(ProductionConnectionStringsDefault)
+          ConnectionStringsIdentityService: $(ProductionConnectionStringsIdentityService)
+          ConnectionStringsAdministrationService: $(ProductionConnectionStringsAdministrationService)
+          ConnectionStringsFacilityService: $(ProductionConnectionStringsFacilityService)
+          ConnectionStringsCBAccreditationService: $(ProductionConnectionStringsCBAccreditationService)
+          ConnectionStringsSharedService: $(ProductionConnectionStringsSharedService)
+          ConnectionStringsAttachments: $(ProductionConnectionStringsAttachments)
+          ConnectionStringsPaymentsService: $(ProductionConnectionStringsPaymentsService)
+          ConnectionStringsInternalFacilityRequestService: $(ProductionConnectionStringsInternalFacilityRequestService)
+          ConnectionStringsProductCatalog: $(ProductionConnectionStringsProductCatalog)
+          ConnectionStringsExternalFacilityRequestsService: $(ProductionConnectionStringsExternalFacilityRequestsService)
+          ConnectionStringsShipmentService: $(ProductionConnectionStringsShipmentService)
+          ConnectionStringsNotificationService: $(ProductionConnectionStringsNotificationService)
+          migratorFolderName: $(migratorFolderName)
+
+  # Generate Migrator
+  - job: "Migrator_Production_Check_Pending_Migrations"
+    displayName: "Migrator Check Pending Migrations"
+    dependsOn: PrepareMigratorSettings
+    condition: eq(variables.Deploy_Migrator, 'true')
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/Test/componentMigrator/migrator-check-pending-migrations.yaml@DevOpsTemplates
+        parameters:
+          DBName: $(Production_Database_Name)
+          Database_ServerName: $(Production_ServerName)
+          DeveloperEmail: $(DB_DeveloperEmail)
+          DBA_ApproverEmail: $(DBNotifyUsers)
+          ApprovalJobName:  Production_Wait_for_DBA_Approval
+          artifactName: $(artifactName)
+          Notes:  ''
+          migratorFolderName: $(migratorFolderName)
+
+  # Wait for DB Team Approval     
+  - job: Production_Wait_for_DBA_Approval
+    condition: succeeded()
+    dependsOn: Migrator_Production_Check_Pending_Migrations
+    displayName: Production Wait for DB Approval
+    pool: server
+    timeoutInMinutes: 4320 # job times out in 3 days
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 1440 # task times out in 1 day
+      inputs:
+        notifyUsers: |
+          $(DBNotifyUsers)
+        instructions: 'Please review database difference script and resume'         
+
+    # Execute Migrator
+  - job: "Migrator_Production_Execute_Pending_Migrations"
+    displayName: "Execute Migrator"
+    dependsOn: 
+      - Production_Wait_for_DBA_Approval
+      - Migrator_Production_Check_Pending_Migrations
+    condition: succeeded('Production_Wait_for_DBA_Approval')
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/Test/componentMigrator/migrator-execute.yaml@DevOpsTemplates
+        parameters:
+          artifactName: $(artifactName)
+          migratorFolderName: $(migratorFolderName)
+
+  - job: "Production_DB_DifferenceScript"
+    condition: and(eq(variables.Deploy_DB,'true') , succeeded())
+    displayName: "Production DB Difference Script"
+    dependsOn: "Prepare_Prod_Environment"
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/PreProd/difference-db-script.yaml@DevOpsTemplates
+        parameters:
+          DefitionID: ${{ variables.DB_Bulid_DefitionID }}
+          buildID: ${{ variables.DB_Bulid_buildID }}
+          dacpacName: ${{ variables.DB_dacpacName}}
+          publishProfile: ${{ variables.DB_publishProfile }}
+          DeveloperEmail: ${{ variables.DB_DeveloperEmail }}
+          ServerName: ${{ variables.Production_ServerName }}
+          DBName: ${{ variables.Production_DBName}}
+          DBA_ApproverEmail:  ${{ variables.DBNotifyUsers }}
+          ApprovalJobName:  Production_DBA_Approval
+          Notes:  ''
+          # DB_ApproverEmail: $(DBEmailUsers)
+          # exchange-account-app-password: $(exchange-account-app-password)
+          # DestManifestPath: $(DestManifestPath)
+
+  - job: Production_DBA_Approval
+    condition: succeeded('Production_DB_DifferenceScript')
+    displayName: Wait for DB approval on production
+    dependsOn: "Production_DB_DifferenceScript"
+    pool: server
+    timeoutInMinutes: 4320 # job times out in 3 days
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 1440 # task times out in 1 day
+      inputs:
+        notifyUsers: |
+          $(BuildParameters.DBNotifyUsers)
+        instructions: 'Please review database difference script and resume'
+ 
+  - job: "Prod_PR"
+    displayName: "PR into prod, add updated manifests"
+    dependsOn: ["Production_DBA_Approval", "Prepare_Prod_Environment"]
+    condition:  and ( succeeded('Prepare_Prod_Environment'), or ( eq(variables.Deploy_DB,'false'), succeeded()) )
+    variables:
+      - name: SOURCE_BRANCH
+        value: Preprod
+    steps:
+      - template: CI-CD/steps-of-cd/PreProd/pr-pre-prod.yaml@DevOpsTemplates
+        parameters:
+          MANIFEST_DIR: $(MANIFEST_DIR)
+          ImageTagFile: $(ImageTagFile)
+          DestManifestPath: $(DestManifestPath)
+      - template: CI-CD/steps-of-cd/Test/Template/pr.yaml@DevOpsTemplates
+
+  - job: wait_for_Prod_PR_Approval
+    displayName: resume or reject after you (complete or reject the pull request)
+    pool: server
+    dependsOn: Prod_PR
+    condition: succeeded('Prod_PR')
+    timeoutInMinutes: 4320 # job times out in 3 days
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 1440 # task times out in 1 day
+      inputs:
+        notifyUsers: |
+          $(BuildParameters.PRNotifyUsers)
+        instructions: 'Please review my PR and resume'
+  # Done with the PR
+ 
+  - job: "Production_DB_ExecuteScript"
+    displayName: "Execute DB Script into Production"
+    condition:  and(eq(variables.Deploy_DB,'true'), succeeded('Production_DBA_Approval'))
+    dependsOn: "Production_DBA_Approval"
+    pool:
+      name: PS-DatabaseReleaseAgents
+      demands:
+      - ${{ variables.DB_Agent_capabilityName }} -equals true
+    steps:
+      - template: CI-CD/steps-of-cd/PreProd/execute-db-script.yaml@DevOpsTemplates
+        parameters:
+          DefitionID: ${{ variables.DB_Bulid_DefitionID }}
+          buildID: ${{ variables.DB_Bulid_buildID }}
+          dacpacName: ${{ variables.DB_dacpacName }}
+          publishProfile: ${{ variables.DB_publishProfile }}
+          ServerName: ${{ variables.Production_ServerName }}
+          DBName: ${{ variables.Production_DBName }}
+          DestManifestPath: $(DestManifestPath)
+
+  - job: "Production_Deployment"
+    displayName: "Production Deployment"
+    dependsOn: ["Production_DB_ExecuteScript", "wait_for_Prod_PR_Approval"]
+    condition: |
+      or(
+        succeeded('Production_DB_ExecuteScript'), 
+        and(eq(variables.Deploy_DB,'false'), succeeded('wait_for_Prod_PR_Approval'))
+        )
+    variables:
+      - group: ${{ variables.ArgoVarsGroupName }}
+    steps:
+    - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/argocd-sync.yaml@DevOpsTemplates
+        parameters:
+          ArgocdAppName: $(argocdAppName_ProdApp)
+          argocdUserName: $(UserName)
+          argocdPassword: $(Password)
+          ArgocdAppAddrs: $(ArgocdAppAddrs)
+    - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/argocd-sync.yaml@DevOpsTemplates
+        parameters:
+          ArgocdAppName: $(argocdAppName_ProdWeb)
+          argocdUserName: $(UserName)
+          argocdPassword: $(Password)
+          ArgocdAppAddrs: $(ArgocdAppAddrs)
+
+    # If it HelmChart
+  - job: "deployment_status"
+    displayName: "Deployment Status"
+    dependsOn: "Production_Deployment"
+    condition: succeeded('Production_Deployment')
+    steps:
+    # If it helmChart
+    - ${{ if eq(variables['IsHelmChart'], 'true') }}:
+      - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/Template/deploy-status.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointProdAPP)
+            ImageTagFile: $(ImageTagFile)
+      - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/Template/deploy-status.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointProdWEB)
+            ImageTagFile: $(ImageTagFile)
+    # If it plain YAML
+    - ${{ if eq(variables['IsPlainYaml'], 'true') }}:
+      - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/Template/deploy-status.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointProdAPP)
+            ImageTagFile: $(ImageTagFile)
+      - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/Test/Template/deploy-status.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointProdWEB)
+            ImageTagFile: $(ImageTagFile)
+
+  - ${{ if eq(variables['RunApigee'], 'true') }}:
+    - job: "DeployapigeeToProduction"
+      displayName: "Deploy apigee To Production"
+      pool:
+        name: VMSS_AGENTS_LINUX
+      dependsOn: "deployment_status"
+      condition: eq(variables.RunApigee, 'true')
+      variables:
+        - template: test-variables.yaml
+        - group: ${{ variables.productauth }}
+      steps:
+        - template: CI-CD/steps-of-cd/Prod/prod-deploy-apigee.yaml@DevOpsTemplates
+          parameters:
+            proxyName: $(proxyName)
+            prod-auth: $(prod-auth)
+            pre-authorization-header: $(pre-authorization-header)
+            pre-auth: $(pre-auth)
+            prodConfig: $(kubernetesServiceEndpointTest)
+
+    # If there is a problem, RollBack
+    # if there is a need to rollback, then refer to the rollback page:
+    # (https://dev.azure.com/ThiqahDev/Platform/_wiki/wikis/Platform.wiki/259/GitOps-Rollback), 
+    # Otherwise, resume the pipeline
+
+  - job: ManualValidation_Befor_RollBack
+    dependsOn: "deployment_status"
+    condition: failed('deployment_status')
+    displayName: Resume if you want to rollback
+    pool: server
+    timeoutInMinutes: 4320 # job times out in 3 days
+    steps:
+    - task: ManualValidation@0
+      timeoutInMinutes: 4320 # task times out in 3 day
+      inputs:
+        notifyUsers: |
+          $(BuildParameters.RollbackNotifyUsers)
+        instructions: 'If you need to rollback, resume, otherwise reject'
+        
+  - job: "Rollback"
+    displayName: "Rollback"
+    dependsOn: ["deployment_status","ManualValidation_Befor_RollBack"]
+    condition: and (ne(succeeded('deployment_status'), True), succeeded('ManualValidation_Befor_RollBack'))
+    variables:
+      - group: ${{ variables.ArgoVarsGroupName }}
+    steps:
+    - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/rollback.yaml@DevOpsTemplates
+        parameters:
+          ArgocdAppName: $(argocdAppName_ProdApp)
+          argocdUserName: $(UserName)
+          argocdPassword: $(Password)
+          ArgocdAppAddrs: $(ArgocdAppAddrs)
+    - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/rollback.yaml@DevOpsTemplates
+        parameters:
+          ArgocdAppName: $(argocdAppName_ProdWeb)
+          argocdUserName: $(UserName)
+          argocdPassword: $(Password)
+          ArgocdAppAddrs: $(ArgocdAppAddrs)
+
+  # Push to APM
+  - job: "push_apm"
+    displayName: "Push to APM"
+    pool:
+      name: PerformanceTestAgents
+    dependsOn: ["deployment_status","ManualValidation_Befor_RollBack"]
+    condition: and(succeeded('deployment_status'), ne(succeeded('ManualValidation_Befor_RollBack'), True))
+    variables:
+      - group: ${{ variables.GloVarsGroupName }} 
+      - name: envUrl
+        value: mntr.thiqah.sa
+      - name: ApmApiKey
+        value: $(ApmApiKeyProd)
+    steps:
+    - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/push-to-apm.yaml@DevOpsTemplates
+        parameters:
+          kubernetesServiceEndpoint: $(kubernetesServiceEndpointProdAPP)
+    - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/PreProd/push-to-apm.yaml@DevOpsTemplates
+        parameters:
+          kubernetesServiceEndpoint: $(kubernetesServiceEndpointProdWEB)
+
+  # Email Status
+  - job: "deployment_email"
+    displayName: "Send Email Status"
+    dependsOn: ["push_apm"]
+    condition: succeeded('deployment_status')
+    pool:
+      name: PS-AgentPool
+    variables:
+      - group: ${{ variables.GloVarsGroupName }} 
+      - name: releasenote-status
+        value: Failed
+      - name: pushedtagapm-status
+        value: $[ dependencies.push_apm.result ]
+      - name: TARGET_BRANCH
+        value: Production
+      - template: test-variables.yaml
+    steps:
+      - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/PreProd/send-email.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreAPP)
+            exchange-account-app-password: $(exchange-account-app-password)
+            DeploymentStatusEmail: $(DeploymentStatusEmail)
+      - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+        - template: CI-CD/steps-of-cd/PreProd/send-email.yaml@DevOpsTemplates
+          parameters:
+            kubernetesServiceEndpoint: $(kubernetesServiceEndpointPreWEB)
+            exchange-account-app-password: $(exchange-account-app-password)
+            DeploymentStatusEmail: $(DeploymentStatusEmail)
+
+  # Lock the Container Image
+  - job: Prod_Image_Lock
+    dependsOn: "deployment_status"
+    condition: succeeded('deployment_status')
+    displayName: "Lock the Container Image"
+    variables:
+      - group: ${{ variables.GloVarsGroupName }} 
+    steps:
+    - ${{ if eq(variables['UseAppCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/Prod/image-lock.yaml@DevOpsTemplates
+        parameters:
+          serviceprincipalUsername: $(acr-scan-username)
+          serviceprincipalPassword: $(acr-scan-password)
+          kubernetesServiceEndpoint: $(kubernetesServiceEndpointProdAPP)
+    - ${{ if eq(variables['UseWebCluster'], 'true') }}:
+      - template: CI-CD/steps-of-cd/Prod/image-lock.yaml@DevOpsTemplates
+        parameters:
+          serviceprincipalUsername: $(acr-scan-username)
+          serviceprincipalPassword: $(acr-scan-password)
+          kubernetesServiceEndpoint: $(kubernetesServiceEndpointProdWEB)
