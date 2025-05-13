@@ -1,0 +1,130 @@
+variables:
+  - name: PROJECT_NAME
+    value: sdr
+  - name: PROGRAM_NAME # The Name of the Project 
+    value: sfda
+  - name: PRODUCT_NAME
+    value: sdr
+  - name: REPO_NAME  # ACR Repo Name
+    value: web
+  - name: AppRepoBranchName  
+    value: develop    
+# -----------------Tag Details-----------------------
+  - name: IMAGETAG # Image Tag
+    value: v0.0.3.2
+  - name: PipelineName
+    value: Backend-CI
+# -----Parameters: Build and Run Unit Test -----
+  - name: IsDotNet # Is It .NET Service?
+    value: 'true' # true or false
+  - name: projectPath
+    value: 'src/Thiqah.Halal.HttpApi.Host/Thiqah.Halal.HttpApi.Host.csproj'
+  - name: solutionPath
+    value: 'Halal.sln' 
+  - name: projectName
+    value: 'Halal'
+  - name: organizationName
+    value: 'thiqah'
+  - name: VariablesFilePath
+    value: 'Pipeline/Backend/Backend-variables.yaml'
+  - name: testProject
+    value: '**/*[Tt]ests/*.csproj' #'test/Thiqah.Halal.Application.Tests/Thiqah.Halal.Application.Tests.csproj'
+  - name: testArguments
+    value: '--no-build --no-restore -c Release --logger trx --results-directory $(Build.SourcesDirectory)/TestResults/ /p:CollectCoverage=true "/p:CoverletOutputFormat=\"opencover,cobertura\"" /p:CoverletOutput=./TestResults/ "'  
+  - name: testResultsFormat
+    value: VSTest
+  - name: testResultsFiles 
+    value: '**/TestResults/*.trx'
+  - name: testSummaryFileLocation  
+    value: '$(Build.SourcesDirectory)/**/TestResults/coverage.cobertura.xml'
+  - name: TestCovergePath  
+    value: /testresults/FacilityService-Application-coverage.xml,/testresults/FacilityService-Domain-coverage.xml,/testresults/IdentityService-Application-coverage.xml
+  - name: nugetConfigPath   
+    value: ./NuGet.Config
+  - name: DepCheckProjectName
+    value: sfda-halal
+  - name: SourceImageTagFile
+    value: Deployment/helm-chart/backend/values.yaml
+# --------Parameters: Container Image-----------
+    # path to docker file in the app repo
+  - name: sourceLocation  
+    value: src/Thiqah.Halal.HttpApi.Host/
+    # docker build context path
+  - name: buildcontext  
+    value: .
+    # docker file name
+  - name: dockerFile  
+    value: "Dockerfile" 
+  - name: acr # Name of the ACR 
+    value: acr
+  - name: signingKeyFile # The Used Key to Sign the Image 
+    value: a9efb4e5acc8ff89bc145e7bfe848dd3a8c8d8f25ecca077ea96e8dbc10e4a8d.key
+  - name: acrName
+    value: tbsazdevacr.azurecr.io
+  - name: buildArgs # Args to be used in the build phase such as: --build-arg PAT=$(pat) --build-arg NPM_TOKEN=$(NPM_TOKEN)
+    value:  --build-arg PAT=$(System.AccessToken)
+# -------- Manifest Type-----------
+  - name: MainfestScan 
+    value: false
+  - name: IsHelmChart 
+    value: true
+  - name: IsPlainYaml 
+    value: false
+# ---------- Build DacPac ----------------
+  - name: Deploy_DB 
+    value: false
+  - name: DBsolution  
+    value: SPGA.Main.Db/SPGA.Main.Db.sqlproj
+  - name: msbuildArgs  
+    value: /p:DeployOnBuild=true /p:WebPublishMethod=Package /p:PackageAsSingleFile=true /p:SkipInvalidConfigurations=true /p:PackageLocation="$(build.artifactstagingdirectory)\\"
+  - name: BuildPlatform  
+    value: release
+  - name: BuildConfiguration  
+    value: any cpu
+  - name: SourceFoldertoCopy  
+    value: SPGA.Main.Db\bin\Output
+# --------Parameters: Updating Manifests-----------
+    # path of Manifest folder in app repo for ex: "xyz/charts/component-1/"
+  - name: MANIFEST_PATH
+    value: Deployment/helm-chart/backend/
+  - name: REPO_URL # Config Repo
+    value: https://dev.azure.com/ThiqahDev/SPGA_RealEstateOwnership/_git/config
+# -----K8S Connection & Deployment FeedBack----------
+  - name: GloVarsGroupName # Name of the Global Variable Group 
+    value: halal-glob-group
+# ----- Customized Variable Group Name & Keys -----
+  - name: CuzVarsGroupName # # Name of the Customized Variable Group 
+    value: halal-passphrase
+  - name: keyVarName # The Key Name of the Value of the Signing Secret in the Variable Group
+    value: $(halal)  # Key Name
+# ---------Run Apigee -- generate swageer ------------
+  - name: RunApigee # Deploy apigee apiproxy ? 
+    value: false 
+  - name: apiOutputPath  
+    value: 'src/Acme.BookStore.HttpApi.Host/bin/Debug/net6.0'
+  - name: apiAssemblyName 
+    value: 'Acme.BookStore.HttpApi.Host.dll'
+  - name: swaggerFileName
+    value: 'api.json'
+  - name: artifactFormat
+    value: 'openapi'
+# ------------------------------------ Build Migrator ------------------------------------------
+  - name: Deploy_Migrator   
+    value: true
+  - name: MigratorProject 
+    value: "src/Thiqah.Halal.DbMigrator/Thiqah.Halal.DbMigrator.csproj"
+  - name: migratorFolderName
+    value: HalalDbMigrator
+  - name: msbuildArgs   
+    value: /p:DeployOnBuild=true /p:WebPublishMethod=Package /p:PackageAsSingleFile=true /p:SkipInvalidConfigurations=true /p:PackageLocation="$(build.artifactstagingdirectory)\\"
+  - name: BuildPlatform   
+    value: release
+  - name: BuildConfiguration 
+    value: any cpu
+  - name: MigratorNugetConfigPath 
+    value: "./NuGet.Config"
+    # ---------- Camunda --------------------
+  - name: Deploy_Camunda
+    value: true
+  - name: CamundaProject
+    value: "src/Thiqah.Halal.CamundaDeployer/Thiqah.Halal.CamundaDeployer.csproj"
