@@ -1,0 +1,271 @@
+variables:
+  - name: Config_Repo # Config Repo Name
+    value: Config
+  - name: MANIFEST_DIR # The Path to the Service Manifest in the GitOps Repo
+    value: $(System.DefaultWorkingDirectory)/$(Config_Repo)
+# --------Manifest Type-----------
+  - name: IsHelmChart
+    value: true
+  - name: IsPlainYaml
+    value: false
+# -------------------
+  - name: Reviewers # List of the Reviewers, you can add mmany reviewers, sperate them by space
+    value: a.soyiana@dev.thiqah.sa
+  - name: PROJECT_NAME # The Name of the Project 
+    value: $(System.TeamProject)
+  - name: DestManifestPath 
+    value: halal/charts/backend
+# -----K8S Connection & Deployment FeedBack----------
+  - name: kubernetesServiceEndpointPreAPP # Pre K8S EndPoint APP
+    value: 'thiqah-pre-app'
+  - name: kubernetesServiceEndpointPreWEB # Pre K8S EndPoint Web
+    value: 'thiqah-pre-web'
+  - name: kubernetesServiceEndpointProdAPP # Prod K8S EndPoint APP
+    value: 'thiqah-prod-app'
+  - name: kubernetesServiceEndpointProdWEB # Prod K8S EndPoint Web
+    value: 'thiqah-prod-web'
+  - name: NAMESPACE # The Namespace Name of the Service to be Deployed in, used for deployment feed back, image lock, and set image
+    value: halal
+  - name: maintenancePageLabel # This will be used in the maintenance phase
+    value: app=nginx # make sure you follow the same format
+  - name: maintenancePageDeployName
+    value: nginx-deployment
+  - name: maintenancePagePort
+    value: 80 # make sure you follow the same format
+# ----- Global Variable Group Name & Keys -----
+  - name: GloVarsGroupName # Name of the Global Variable Group
+    value: halal-glob-group
+  #- name: serviceprincipalUsername
+  #  value: $(serviceprincipalUsername) # Key Name
+  #- name: serviceprincipalPassword
+  #  value: $(serviceprincipalPassword) # Key Name
+  #- name: acrTenant
+  #  value: $(acrTenant) # Key Name
+# ----- used clusters---------
+  - name: UseAppCluster
+    value: true
+  - name: UseWebCluster
+    value: false
+# ----- Argo Variable Group & Argocd Sync App---------
+  # creating new vairable group for argo service account for pre and prod with below keys
+  # 'UserName': argo service account username
+  # 'Password': argo service account password
+  - name: ArgoVarsGroupName
+    value: argocd-creds
+  - name: ArgocdAppAddrs
+    value: argo.thiqah.sa:443
+  - name: argocdAppName_PreApp
+    value: pre-app-cluster-halal
+  - name: argocdAppName_PreWeb
+    value: pre-web-cluster-halal
+  - name: argocdAppName_ProdApp
+    value: prod-app-cluster-halal
+  - name: argocdAppName_ProdWeb
+    value: prod-web-cluster-halal
+# ----- Database Script data---------
+  - name: Deploy_DB
+    value: false
+  - name: maintenancePage
+    value: false
+  - name: databaseScript
+    value: false
+    #user-defined capability to select the appropriate agent from the pool, which its value is true
+  - name: DB_Agent_capabilityName
+    value: Halal
+  - name: DB_Bulid_DefitionID
+    value: 
+  - name: DB_Bulid_buildID
+    value:
+  - name: DB_dacpacName
+    value: drop/.dacpac
+  - name: DB_publishProfile
+    value: drop/.publish.xml
+    # to recieve database comments if script refused by DBA
+  - name: DB_DeveloperEmail
+    value: asbabtain@thiqah.sa, atalhi@thiqah.sa, kmousa@thiqah.sa, mfawaz@thiqah.sa, hsayigh@thiqah.sa, hrabie@thiqah.sa, mshemy@thiqah.sa
+  - name: PreProd_ServerName
+    value: 172.24.132.22,55225
+  - name: PreProd_DBName
+    value: ehkaamK8s_pp
+  - name: Production_ServerName
+    value: 172.24.138.11,55225
+  - name: Production_DBName
+    value: ehkaam_K8s
+# -------- Performance Test: JMeter -----------
+  - name: RunPerfTest # Do you need to run Performance test? 
+    value: false
+  - name: isPerfJMeterAutomated # Is JMeter for Performance Test Automated?
+    value: false
+  # two variable Groups
+  #- name: PerfVarsGroupName
+  #  value: MigratorTest
+  #- name: Perf2VarsGroupName
+  #  value: 'Performance Execution Variables'
+  #- name: PathtoPublish
+  #  value: e_Auction/.idea
+  - name: Baseline-CU
+    value: 5
+  - name: Baseline-ramp-up
+    value: 5
+  - name: Baseline-hold-for
+    value: 5
+  - name: fileNamePathOfProject # junit-xml module
+    value: /home/qcadmin/e_Auction_Result/Results_Load_VM.xml
+  - name: ScenariosScriptPath
+    value: $(System.ArtifactsPath)/E-Auction-VM.V1.0.jmx
+  - name: jmeterHome
+    value: /home/qcadmin/apache-jmeter-5.3/bin/
+  - name: jmeterPath
+    value: /home/qcadmin/apache-jmeter-5.3/bin/jmeter.sh
+  - name: JMeterVersion
+    value: 5.3
+  - name: searchFolder
+    value: /home/qcadmin/e_Auction_Result/
+  - name: artifactPath
+    value: taurus-output/
+# ------ QC Testing -----------
+  - name: RunQCTest # Do you need to run QC test ? 
+    value: false
+  - name: ApiQCTest # Api Test?
+    value: false
+  - name: UIQCTest # UI Test?
+    value: false 
+  - name: QCSecureFileName
+    value: 'Mazad_DB.yaml'
+  - name: QCVarsGroupName # Variable Group
+    value: QC_Automation
+  - name: QCWorkingDir   # Working Dir for the UI
+    value: 
+  - name: VariableFronJsonFilePath
+    value: 
+  # ---- API QC -----
+  - name: ApiQCWorkingDir
+    value: $(System.DefaultWorkingDirectory)/_MOJ_eAuction_QC_Automation
+  - name: API_RP_UUID
+    value: $(RP_UUID)
+  - name: API_RP_LAUNCH
+    value: DevOps_eAuction_API(Test)
+  - name: API_RP_PROJECT
+    value: MOJ_eAuction
+  - name: ApiVariableFronJsonFilePath
+    value: $(System.DefaultWorkingDirectory)/_MOJ_eAuction_QC_Automation/ReportportalUID.json
+  # ---- UI QC -----
+  - name: UI_RP_UUID
+    value: $(RP_UUID)
+  - name: UI_RP_LAUNCH
+    value: 
+  - name: UI_RP_PROJECT
+    value: 
+  - name: QCSecureFile
+    value: 
+# ------ Pent Testing -----------
+  - name: RunPentTest # Do you need to run Pent test ? 
+    value: false
+  - name: isPenAutomated # Is Penetration Test Automated?
+    value: true
+  - name: PenscanWebSites
+    value: 5927d603-445d-4ae3-19c3-af65020155c0
+  - name: PenscanWebSitesProfile
+    value: e8fba3fe-7525-4091-4d96-af65021bda5f
+# ----------QC Manual Validation ---------------
+  - name: BuildParameters.QCNotifyUsers
+    # value: a.ahummadi@dev.thiqah.sa, a.hmutairi@dev.thiqah.sa, a.azahran@dev.thiqah.sa, ashameya@thiqah.sa
+    value: a.ashameya@dev.thiqah.sa, a.grashid@dev.thiqah.sa
+# ---------- BD Manual Validation ---------------
+## only this work with thiqah emails
+  - name: DBNotifyUsers
+    value: asbabtain@thiqah.sa, atalhi@thiqah.sa, kmousa@thiqah.sa, mfawaz@thiqah.sa, hsayigh@thiqah.sa, hrabie@thiqah.sa, mshemy@thiqah.sa
+# ---------- PR Manual Validation ---------------
+  - name: BuildParameters.PRNotifyUsers
+    value: a.mmahdy@dev.thiqah.sa, mewida@dev.thiqah.sa, melarousy@dev.thiqah.sa, a.soyiana@dev.thiqah.sa  
+# ----------Penetration Manual Validation ---------------
+  - name: BuildParameters.PentNotifyUsers
+    value: a.mmahdy@dev.thiqah.sa, mewida@dev.thiqah.sa, melarousy@dev.thiqah.sa, a.soyiana@dev.thiqah.sa 
+# ----------Performance Manual Validation ---------------
+  - name: BuildParameters.PerfNotifyUsers
+    value: a.mmahdy@dev.thiqah.sa, mewida@dev.thiqah.sa, melarousy@dev.thiqah.sa, a.soyiana@dev.thiqah.sa
+# -------- RollBack Manual Validation ----------------
+  - name: BuildParameters.RollbackNotifyUsers
+    value: a.mmahdy@dev.thiqah.sa, mewida@dev.thiqah.sa, melarousy@dev.thiqah.sa, a.soyiana@dev.thiqah.sa
+    # -------- Deploy Apigee ----------------
+  - name: RunApigee # Deploy apigee apiproxy ? 
+    value: false # true or false
+  - name: projectName
+    value: 'thiqah'
+  - name: proxyName
+    value: 'SPA-test-platform'
+# ----- Customized Variable Group Name & Keys -----
+  - name: productauth # Name of the Customized Variable Group
+    value: 'product-deploy-auth'
+  - name: AuthProxy # Name of the Customized Variable Group
+    value: AuthProxy
+# -------- Deployment status Email ----------------
+  - name: DeploymentStatusEmail # NOT dev account
+    value: mshemy@thiqah.sa
+# ------------------------------------ Build Migrator ------------------------------------------
+  - name: Deploy_Migrator
+    value: true
+  - name: GloVarsGroupNameppcs
+    value: preconnectionStrings
+  - name: GloVarsGroupNamepcs
+    value: productionconnectionStrings
+  - name: MigratorProject
+    value: "src/Thiqah.Halal.DbMigrator/Thiqah.Halal.DbMigrator.csproj"
+  - name: artifactName
+    value: Thiqah.Halal.DbMigrator
+  - name: migratorFolderName
+    value: HalalDbMigrator
+  - name: msbuildArgs
+    value: /p:DeployOnBuild=true /p:WebPublishMethod=Package /p:PackageAsSingleFile=true /p:SkipInvalidConfigurations=true /p:PackageLocation="$(build.artifactstagingdirectory)\\"
+  - name: BuildPlatform
+    value: release
+  - name: BuildConfiguration
+    value: any cpu
+  - name: MigratorNugetConfigPath
+    value: "./NuGet.Config"
+  - name: Pre_ServerName
+    value: halaldb-pre.thiqah.sa
+  - name: Pre_Database_Name
+    value: halal
+  - name: Production_ServerName
+    value: halaldb.thiqah.sa
+  - name: Production_Database_Name
+    value: halal 
+  - name: MigrationScriptFilePath
+    value: $(System.DefaultWorkingDirectory)\$(System.TeamProject)\DatabaseMigrations
+# ---------- Camunda --------------------
+  - name: Deploy_Camunda
+    value: false
+  - name: CamundaProject
+    value: "src/Thiqah.Halal.CamundaDeployer/Thiqah.Halal.CamundaDeployer.csproj"
+  - name: artifactNameCamunda
+    value: Thiqah.Halal.CamundaDeployer
+  - name: CamundaFolderName
+    value: HalalCamunda
+  - name: PreGatewayAddress
+    value: "https://saas-zeebegateway-pp.thiqah.sa:55443"
+  - name: PreTaskBaseUrl
+    value: "https://saas-camunda8-tasklist-pp.thiqah.sa/v1/tasks"
+  - name: PreTokenBaseUrl
+    value: "https://saas-camunda8-keycloak-pp.thiqah.sa/auth/realms/camunda-platform/protocol/openid-connect"
+  - name: PreOperateBaseUrl
+    value: "https://saas-camunda8-operate-pp.thiqah.sa/v1"
+  - name: PreClientId
+    value: "halal"
+  - name: PreClientSecret
+    value: "jC7HLYBKyt4jUev23wbkY20uJgv8b4tL"
+# ---------- Window Maintenance Variables --------------------
+  - name: portfolio
+    value: ""
+  - name: clientN
+    value: ""
+  - name: productN
+    value: ""
+  - name: sys
+    value: ""    
+  - name: duration
+    value: ""    
+  - name: token
+    value: ""  
+  - name: windowsToken
+    value: ""
