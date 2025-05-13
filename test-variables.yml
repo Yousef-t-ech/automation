@@ -1,0 +1,203 @@
+variables:
+  - name: PROJECT_NAME
+    value: halal
+  - name: PROGRAM_NAME # The Name of the Project 
+    value: sfda
+  - name: PRODUCT_NAME
+    value: halal
+  - name: REPO_NAME  # ACR Repo Name
+    value: backend
+  - name: CONFG_REPO_NAME # Config Repo Name (Git)
+    value: Config
+  - name: APP_REPO_NAME # Application Repo Name (Git)
+    value: Thiqah.Halal.Backend
+  - name: APP_REPO_DIR
+    value: $(System.DefaultWorkingDirectory)/App_Repo
+  - name: MANIFEST_DIR # The Dir of the Manifest
+    value: $(System.DefaultWorkingDirectory)/$(CONFG_REPO_NAME)
+  - name: PERF_REPO_NAME
+    value: ehkaam_ShiftLeftPerformanceTest
+  - name: PERF_DIR
+    value: $(System.DefaultWorkingDirectory)/$(PERF_REPO_NAME)
+# --------Parameters: Updating Manifests-----------
+    # path of Manifest folder in app repo for ex: "xyz/charts/component-1/"
+  - name: MANIFEST_PATH
+    value: Deployment/helm-chart/backend/
+  - name: REPO_URL # Config Repo
+    value: https://dev.azure.com/ThiqahDev/SPGA_RealEstateOwnership/_git/config
+# ----- Full Path For the Manifest to Be Copied --------
+  - name: SourceManifestPath # Path to the Service Manifest in the App Repo
+    value: $(Build.SourcesDirectory)/$(APP_REPO_NAME)/$(MANIFEST_PATH) 
+    # path of Manifest folder in config repo ( ended "without" '/' ) for ex: "mazad/charts/component-1"
+    # and it must be created first
+  - name: DestManifestPath   
+    value: halal/charts/backend
+    # The yaml that Contains the image tag value which needs to be updated
+  - name: ImageTagFile  
+    value: $(DestManifestPath)/values.yaml
+# -----K8S Connection & Deployment FeedBack----------
+  - name: kubernetesServiceEndpointTest # Test K8S EndPoint
+    value: 'aks-halal'
+  - name: NAMESPACE # The Namespace Name of the Service to be Deployed in
+    value: halal
+    # DeployName: will be used for testing that deployment is created and its status is Ok
+    # format: {argo-application-name}-{chart-name}
+  - name: DeployName
+    value: halal-backend
+  - name: IMAGE # Image Name
+    value: $(REPO_NAME)
+# ------ QC Testing -----------
+  - name: RunQCTest # Do you need to run QC test for this component?
+    value: false
+  - name: ApiQCTest # Api Test?
+    value: false
+  - name: UIQCTest # UI Test? 
+    value: false 
+  - name: QCVarsGroupName # Variable Group 
+    value: 'QC_Automation'
+  - name: QCWorkingDir   # Working Dir for the UI
+    value: 
+  - name: VariableFronJsonFilePath
+    value: 
+  # ---- API QC -----
+  - name: ApiQCWorkingDir
+    value: ./
+  - name: API_RP_UUID
+    value: 7cf724a1-35dc-4a05-9dfb-70f4aa622a83
+  - name: API_RP_LAUNCH
+    value: DevOps_eAuction_API(Test)
+  - name: API_RP_PROJECT
+    value: MOJ_eAuction
+  - name: ApiVariableFronJsonFilePath
+    value: ReportportalUID.json
+  # ---- UI QC -----
+  - name: UI_RP_UUID 
+    value: $(RP_UUID)
+  - name: UI_RP_LAUNCH
+    value: DevOps_AamalyMP_UI(Testing)
+  - name: UI_RP_PROJECT
+    value: aamaly_marketplace
+  - name: QCSecureFile
+    value: Mazad_DB.yaml
+# ------------- Performance Test--------------------
+  - name: RunPerfTest # Do you need to run performance test for this component?
+    value: false # -> Yes!
+# ----- Database Script data---------
+  - name: databaseScript  
+    value: false
+  - name: DB_dacpacName  
+    value: drop/SPGA.Main.Db.dacpac
+  - name: DB_publishProfile 
+    value: drop/SPGA.Main.Db.publish.xml
+  - name: ConnectionString  
+    value: "Server=TBS-TSTDEV-DB01.dev.thiqah.sa;User Id=mowathiq;Password=wWu[c8renWK5T+c];Database=SPGA.Main-k8s"
+# ---------Run Apigee -- generate swageer ------------
+  - name: RunApigee # Deploy apigee apiproxy ? 
+    value: false 
+  - name: apiOutputPath
+    value: 'src/Acme.BookStore.HttpApi.Host/bin/Debug/net6.0'
+  - name: apiAssemblyName
+    value: 'Acme.BookStore.HttpApi.Host.dll'
+  - name: swaggerFileName
+    value: 'api.json'
+  - name: artifactFormat 
+    value: 'openapi'
+  - name: projectName
+    value: 'thiqah'
+  - name: proxyName
+    value: 'SPA-test-platform'
+  - name: description
+    value: 'test platform'
+  - name: organizationName
+    value: 'thiqah'
+  - name: lang
+    value: 'nestjs'
+  - name: origin
+    value: 'https://google.com'
+  - name: recaptcha
+    value: 'lgdkughskujghkdgkus'
+  - name: credentials
+    value: 'Basic lihlirfdhlidh'
+  - name: realmName
+    value: 'aamaly'
+  - name: target
+    value: 'https://google.com'
+  - name: AuthProxy # Name of the Customized Variable Group (Apigee)
+    value: AuthProxy
+# ------ Release Helmchart changes only -----
+  - name: helmChartOnly
+    value: false
+# ------------------------------------ Build Migrator ------------------------------------------
+  - name: Deploy_Migrator
+    value: false
+  - name: MigratorProject
+    value: "src/Thiqah.Halal.DbMigrator/Thiqah.Halal.DbMigrator.csproj"
+  - name: artifactName 
+    value: Thiqah.Halal.DbMigrator
+  - name: migratorFolderName  
+    value: HalalDbMigrator
+  - name: DBNotifyUsers   
+    value: rabdelrahman@thiqah.sa
+  - name: DB_DeveloperEmail  
+    value: rabdelrahman@thiqah.sa
+  - name: Test_ServerName   
+    value: 172.29.6.25
+  - name: Test_Database_Name  
+    value: Hala_test
+# ---------- Migrator setting ---------------- 
+  - name: MigrationScriptFilePath 
+    value: $(System.DefaultWorkingDirectory)\$(System.TeamProject)\DatabaseMigrations
+  - name: RedisConfiguration
+    value: "saas-redis-standalone-master.saas-redis,user=halal,password=KSjk@XjX11$2,defaultDatabase=23,connectTimeout=500,connectRetry=1,abortConnect=false"
+  - name: ConnectionStringsDefault
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsIdentityService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsAdministrationService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsFacilityService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name:  ConnectionStringsCBAccreditationService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsSharedService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsAttachments
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsPaymentsService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsInternalFacilityRequestService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsProductCatalog
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsExternalFacilityRequestsService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsShipmentService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: ConnectionStringsNotificationService
+    value: "Server=172.25.74.12;User Id=Hala_test_user;Password=X1l706BiEDG3M9nHE;Database=Hala_test;persist security info=true;TrustServerCertificate=True"
+  - name: pipeline
+    value: "backend"
+# ---------- appsetting path ---------------- 
+  - name: appSettingsPath
+    value: 'src/Thiqah.Halal.DbMigrator/appsettings.json'
+# ---------- Camunda --------------------
+  - name: Deploy_Camunda
+    value: true
+  - name: CamundaProject
+    value: "src/Thiqah.Halal.CamundaDeployer/Thiqah.Halal.CamundaDeployer.csproj"
+  - name: artifactNameCamunda  
+    value: Thiqah.Halal.CamundaDeployer
+  - name: CamundaFolderName 
+    value: HalalCamunda
+  - name: GatewayAddress  
+    value: "https://zeebegateway.aks.thiqah.sa:443"
+  - name: TaskBaseUrl  
+    value: "http://camunda-tasklist.aks.thiqah.sa/v1/tasks"
+  - name: TokenBaseUrl  
+    value: "http://camunda-keycloak.aks.thiqah.sa/auth/realms/camunda-platform/protocol/openid-connect"
+  - name: OperateBaseUrl  
+    value: "http://camunda-operate.aks.thiqah.sa/v1"
+  - name: ClientId  
+    value: "halal"
+  - name: ClientSecret  
+    value: "hjVRXz8J7oRrm4BtS43QZgH1dkqnj8Z5"
